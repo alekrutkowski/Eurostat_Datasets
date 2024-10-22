@@ -142,6 +142,15 @@
                     }
                 });
             });
+
+            // Sort the table rows by the string values in the 4th column in decreasing order
+            const rowsArray = Array.from(tbody.rows);
+            rowsArray.sort((a, b) => {
+                const aText = a.cells[3]?.textContent || "";
+                const bText = b.cells[3]?.textContent || "";
+                return bText.localeCompare(aText);
+            });
+            rowsArray.forEach(row => tbody.appendChild(row));
         }
 
         function downloadTableAsCsv() {
