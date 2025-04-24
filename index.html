@@ -64,7 +64,7 @@
         });
 
         function fetchEurostatData() {
-            const url = 'https://corsproxy.io/?https%3A%2F%2Fec.europa.eu%2Feurostat%2Fapi%2Fdissemination%2Fcatalogue%2Ftoc%2Ftxt%3Flang%3DEN';
+            const url = 'https://corsproxy.io/?url=https%3A%2F%2Fec.europa.eu%2Feurostat%2Fapi%2Fdissemination%2Fcatalogue%2Ftoc%2Ftxt%3Flang%3DEN';
             fetch(url)
                 .then(response => {
                     if (!response.ok) {
