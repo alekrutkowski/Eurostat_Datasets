@@ -112,9 +112,6 @@
       container.innerHTML = html;
       document.getElementById("loading").style.display = "none";
       document.getElementById("downloadCsvButton").style.display = "block";
-
-      // If you have *huge* tables and still see jank, you can chunk-render:
-      // chunkedRender(rows, header, container);
     }
 
     function fail(msg) {
