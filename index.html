@@ -39,7 +39,7 @@
     async function fetchData() {
       try {
         const resp = await fetch(
-          'https://corsproxy.io/?url=https%3A%2F%2Fec.europa.eu%2Feurostat%2Fapi%2Fdissemination%2Fcatalogue%2Ftoc%2Ftxt%3Flang%3DEN'
+          'https://ec.europa.eu/eurostat/api/dissemination/catalogue/toc/txt?lang=EN'
         );
         if (!resp.ok) throw new Error(resp.statusText);
         const text = await resp.text();
