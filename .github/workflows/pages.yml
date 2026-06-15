@@ -1,0 +1,73 @@
+name: Build and deploy Eurostat Datasets
+
+on:
+  push:
+    branches: [main]
+
+  workflow_dispatch:
+
+  schedule:
+    - cron: "5 11,23 * * *"
+      timezone: "Europe/Brussels"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build static site and download Eurostat TOC
+        run: |
+          set -euo pipefail
+
+          rm -rf _site
+          mkdir -p _site
+
+          cp index.html _site/index.html
+
+          curl -fsSL \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-all-errors \
+            --compressed \
+            "https://ec.europa.eu/eurostat/api/dissemination/catalogue/toc/txt?lang=EN" \
+            -o _site/eurostat_toc.txt
+
+          test -s _site/eurostat_toc.txt
+          grep -q '"title"' _site/eurostat_toc.txt
+          grep -q '"code"' _site/eurostat_toc.txt
+          grep -q '"type"' _site/eurostat_toc.txt
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

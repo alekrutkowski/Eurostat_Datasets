@@ -29,116 +29,198 @@
   <button id="downloadCsvButton">Download Table as CSV</button>
   <div id="tableContainer"></div>
 
-  <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      fetchData();
-      document.getElementById("downloadCsvButton")
-              .addEventListener("click", downloadCsv);
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  fetchData();
+
+  document.getElementById("downloadCsvButton")
+    .addEventListener("click", downloadCsv);
+});
+
+async function fetchData() {
+  try {
+    const resp = await fetch(`eurostat_toc.txt?ts=${Date.now()}`, {
+      cache: "no-store"
     });
 
-    async function fetchData() {
-      try {
-        const resp = await fetch(
-          'https://ec.europa.eu/eurostat/api/dissemination/catalogue/toc/txt?lang=EN'
-        );
-        if (!resp.ok) throw new Error(resp.statusText);
-        const text = await resp.text();
-        renderTable(text);
-      } catch (e) {
-        console.error("Fetch error:", e);
-        document.getElementById("loading").textContent = "Failed to load data.";
+    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+
+    const text = await resp.text();
+    renderTable(text);
+  } catch (e) {
+    console.error("Fetch error:", e);
+    document.getElementById("loading").textContent = "Failed to load data.";
+  }
+}
+
+function parseEurostatTsv(raw) {
+  const hasTabs = raw.includes("\t");
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+
+  function pushCell() {
+    row.push(cell.trim());
+    cell = "";
+  }
+
+  function pushRow() {
+    if (row.some(x => x !== "")) rows.push(row);
+    row = [];
+  }
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const next = raw[i + 1];
+
+    if (ch === "\"") {
+      if (inQuotes && next === "\"") {
+        cell += "\"";
+        i++;
+      } else {
+        inQuotes = !inQuotes;
       }
+      continue;
     }
 
-    function renderTable(raw) {
-      const lines = raw.trim().split("\n");
-      if (lines.length < 2) {
-        showNoData();
-        return;
+    if (!inQuotes && hasTabs && ch === "\t") {
+      pushCell();
+      continue;
+    }
+
+    if (!inQuotes && !hasTabs && ch === " ") {
+      pushCell();
+      while (raw[i + 1] === " ") i++;
+      continue;
+    }
+
+    if (!inQuotes && (ch === "\n" || ch === "\r")) {
+      if (ch === "\r" && next === "\n") i++;
+      pushCell();
+      pushRow();
+      continue;
+    }
+
+    cell += ch;
+  }
+
+  if (cell.length || row.length) {
+    pushCell();
+    pushRow();
+  }
+
+  return rows;
+}
+
+function escapeHtml(x) {
+  return String(x ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function renderTable(raw) {
+  const parsed = parseEurostatTsv(raw);
+
+  if (parsed.length < 2) {
+    showNoData();
+    return;
+  }
+
+  const header = parsed[0].map(h => h.replace(/"/g, "").trim());
+  const typeIdx = header.indexOf("type");
+  const codeIdx = header.indexOf("code");
+
+  if (typeIdx < 0) return fail("No 'type' column");
+  if (codeIdx < 0) return fail("No 'code' column");
+
+  const rows = [];
+
+  for (let i = 1; i < parsed.length; i++) {
+    const cols = parsed[i].map(c => c.replace(/"/g, "").trim());
+    const t = (cols[typeIdx] || "").toLowerCase();
+
+    if (t !== "dataset" && t !== "table") continue;
+
+    [3, 4].forEach(j => {
+      const txt = cols[j];
+      if (/^\d{2}\.\d{2}\.\d{4}$/.test(txt)) {
+        const [d, m, y] = txt.split(".");
+        cols[j] = `${y}.${m}.${d}`;
       }
+    });
 
-      // Parse header & find indexes
-      const header = lines[0].split("\t").map(h => h.replace(/"/g, ""));
-      const typeIdx = header.indexOf("type");
-      const codeIdx = header.indexOf("code");
-      if (typeIdx < 0) return fail("No ‘type’ column");
+    rows.push(cols);
+  }
 
-      // Build data rows array, filtering + date-formatting inline
-      const rows = [];
-      for (let i = 1; i < lines.length; i++) {
-        if (!lines[i]) continue;
-        const cols = lines[i].split("\t").map(c => c.replace(/"/g, "").trim());
-        const t = cols[typeIdx].toLowerCase();
-        if (t !== "dataset" && t !== "table") continue;
+  rows.sort((a, b) => (b[3] || "").localeCompare(a[3] || ""));
 
-        // reformat dd.mm.yyyy → yyyy.mm.dd in columns 4 & 5 (indexes 3 & 4)
-        [3,4].forEach(j => {
-          const txt = cols[j];
-          if (/^\d{2}\.\d{2}\.\d{4}$/.test(txt)) {
-            const [d,m,y] = txt.split(".");
-            cols[j] = `${y}.${m}.${d}`;
-          }
-        });
+  let html = "<table><thead><tr>";
 
-        rows.push(cols);
+  header.forEach(h => {
+    const cap = h.charAt(0).toUpperCase() + h.slice(1);
+    html += `<th>${escapeHtml(cap)}</th>`;
+  });
+
+  html += "</tr></thead><tbody>";
+
+  for (const cols of rows) {
+    html += "<tr>";
+
+    header.forEach((_, idx) => {
+      const cell = cols[idx] || "";
+
+      if (idx === codeIdx && cell) {
+        const url = `https://ec.europa.eu/eurostat/databrowser/view/${encodeURIComponent(cell)}/default/table?lang=en`;
+        html += `<td><a href="${url}" target="_blank" rel="noopener">${escapeHtml(cell)}</a></td>`;
+      } else {
+        html += `<td>${escapeHtml(cell)}</td>`;
       }
+    });
 
-      // Sort by 4th column descending
-      rows.sort((a, b) => (b[3]||"").localeCompare(a[3]||""));
+    html += "</tr>";
+  }
 
-      // Build one big HTML string
-      let html = "<table><thead><tr>";
-      header.forEach(h => {
-        const cap = h.charAt(0).toUpperCase() + h.slice(1);
-        html += `<th>${cap}</th>`;
-      });
-      html += "</tr></thead><tbody>";
+  html += "</tbody></table>";
 
-      for (const cols of rows) {
-        html += "<tr>";
-        cols.forEach((cell, idx) => {
-          if (idx === codeIdx && cell) {
-            const url = `https://ec.europa.eu/eurostat/databrowser/view/${cell}/default/table?lang=en`;
-            html += `<td><a href="${url}" target="_blank">${cell}</a></td>`;
-          } else {
-            html += `<td>${cell}</td>`;
-          }
-        });
-        html += "</tr>";
-      }
-      html += "</tbody></table>";
+  const container = document.getElementById("tableContainer");
+  container.innerHTML = html;
 
-      const container = document.getElementById("tableContainer");
-      container.innerHTML = html;
-      document.getElementById("loading").style.display = "none";
-      document.getElementById("downloadCsvButton").style.display = "block";
-    }
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("downloadCsvButton").style.display = "block";
+}
 
-    function fail(msg) {
-      console.error(msg);
-      document.getElementById("loading").textContent = msg;
-    }
-    function showNoData() {
-      document.getElementById("tableContainer").innerHTML = "<p>No data found.</p>";
-      document.getElementById("loading").style.display = "none";
-    }
+function fail(msg) {
+  console.error(msg);
+  document.getElementById("loading").textContent = msg;
+}
 
-    function downloadCsv() {
-      const tbl = document.querySelector("table");
-      if (!tbl) return alert("No table to download.");
-      let csv = "";
-      tbl.querySelectorAll("tr").forEach(r => {
-        const cells = Array.from(r.querySelectorAll("th,td"))
-                           .map(c => `"${c.textContent.replace(/"/g,'""')}"`);
-        csv += cells.join(",") + "\n";
-      });
-      const blob = new Blob([csv], {type: "text/csv"});
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "eurostat_data.csv";
-      a.click();
-    }
+function showNoData() {
+  document.getElementById("tableContainer").innerHTML = "<p>No data found.</p>";
+  document.getElementById("loading").style.display = "none";
+}
 
-  </script>
+function downloadCsv() {
+  const tbl = document.querySelector("table");
+  if (!tbl) return alert("No table to download.");
+
+  let csv = "";
+
+  tbl.querySelectorAll("tr").forEach(r => {
+    const cells = Array.from(r.querySelectorAll("th,td"))
+      .map(c => `"${c.textContent.replace(/"/g, '""')}"`);
+    csv += cells.join(",") + "\n";
+  });
+
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "eurostat_data.csv";
+  a.click();
+}
+</script>
 </body>
 </html>
